@@ -205,8 +205,8 @@ class ChatGPTAccountCreator {
 
     generateRandomBirthday() {
         const today = new Date();
-        const minYear = 2000;
-        const maxYear = today.getFullYear() - 18;
+        const minYear = today.getFullYear() - 65;
+        const maxYear = 2000;
 
         const year = Math.floor(Math.random() * (maxYear - minYear + 1)) + minYear;
         const month = Math.floor(Math.random() * 12) + 1;
@@ -902,18 +902,47 @@ class ChatGPTAccountCreator {
             this.log(`🎂 Setting birthday: ${monthNum}/${dayNum}/${yearNum}`);
 
             try {
-                // The birthday is a React Aria DateField with role="spinbutton" segments
-                // Clicking the first segment (month) and typing MMDDYYYY auto-advances through all segments
-                const monthSpin = page.locator('[role="spinbutton"]').first();
-                await monthSpin.waitFor({ state: 'visible', timeout: 10000 });
-                await monthSpin.click();
-                await this.sleep(300);
-
                 const monthStr = String(monthNum).padStart(2, '0');
                 const dayStr = String(dayNum).padStart(2, '0');
                 const yearStr = String(yearNum);
-                await page.keyboard.type(`${monthStr}${dayStr}${yearStr}`, { delay: 80 });
-                await this.sleep(500);
+
+                const spinbuttons = page.locator('[role="spinbutton"]');
+                if (await spinbuttons.count() > 0 && await spinbuttons.first().isVisible().catch(() => false)) {
+                    const monthSpin = spinbuttons.first();
+                    await monthSpin.click();
+                    await this.sleep(300);
+                    await page.keyboard.type(`${monthStr}${dayStr}${yearStr}`, { delay: 80 });
+                    await this.sleep(500);
+                } else {
+                    const monthField = page.locator('select[name*="month" i], input[name*="month" i], input[placeholder*="month" i]').first();
+                    const dayField = page.locator('select[name*="day" i], input[name*="day" i], input[placeholder*="day" i]').first();
+                    const yearField = page.locator('select[name*="year" i], input[name*="year" i], input[placeholder*="year" i]').first();
+                    const dateField = page.locator('input[type="date"], input[name*="birth" i], input[placeholder*="birthday" i]').first();
+
+                    if (await dateField.count() > 0 && await dateField.isVisible().catch(() => false)) {
+                        await dateField.fill(`${yearStr}-${monthStr}-${dayStr}`);
+                    } else if (
+                        await monthField.count() > 0
+                        && await dayField.count() > 0
+                        && await yearField.count() > 0
+                        && await monthField.isVisible().catch(() => false)
+                        && await dayField.isVisible().catch(() => false)
+                        && await yearField.isVisible().catch(() => false)
+                    ) {
+                        await monthField.click();
+                        await monthField.fill(monthStr).catch(async () => page.keyboard.type(monthStr, { delay: 50 }));
+                        await this.sleep(200);
+                        await dayField.click();
+                        await dayField.fill(dayStr).catch(async () => page.keyboard.type(dayStr, { delay: 50 }));
+                        await this.sleep(200);
+                        await yearField.click();
+                        await yearField.fill(yearStr).catch(async () => page.keyboard.type(yearStr, { delay: 50 }));
+                    } else {
+                        throw new Error('No supported birthday input pattern detected');
+                    }
+
+                    await this.sleep(500);
+                }
             } catch (e) {
                 this.log(`❌ Error setting birthday: ${e.message}`, "ERROR");
                 await this.takeDebugScreenshot(page, `birthday_error_${accountNumber}`);
