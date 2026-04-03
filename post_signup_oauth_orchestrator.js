@@ -162,6 +162,57 @@ function isTerminalFailureStatus(status) {
     return status === 'failed' || status === 'failure' || status === 'error';
 }
 
+async function attemptProviderPageProgress(providerPage, logger) {
+    if (!providerPage) {
+        return;
+    }
+
+    const candidateLocators = [
+        providerPage.getByRole('button', { name: /continue/i }),
+        providerPage.getByRole('button', { name: /authorize/i }),
+        providerPage.getByRole('button', { name: /allow/i }),
+        providerPage.getByRole('button', { name: /approve/i }),
+        providerPage.getByRole('button', { name: /continue as/i }),
+        providerPage.getByRole('button', { name: /accept/i }),
+        providerPage.getByRole('link', { name: /continue/i }),
+        providerPage.getByRole('link', { name: /authorize/i }),
+        providerPage.locator('button[data-testid*="continue"]'),
+        providerPage.locator('button[data-testid*="authorize"]'),
+        providerPage.locator('button[type="submit"]')
+    ];
+
+    for (const locator of candidateLocators) {
+        try {
+            const count = await locator.count();
+            if (count === 0) {
+                continue;
+            }
+
+            const target = locator.first();
+            if (await target.isVisible().catch(() => false)) {
+                const label = await target.textContent().catch(() => 'interactive control');
+                await target.click({ timeout: 1500 });
+                logger(`Advanced Codex OAuth handoff by clicking ${String(label || 'interactive control').trim()}.`);
+                return;
+            }
+        } catch {}
+    }
+
+    try {
+        const chooserButtons = providerPage.locator('button, [role="button"]');
+        const count = await chooserButtons.count();
+        for (let index = 0; index < Math.min(count, 5); index++) {
+            const button = chooserButtons.nth(index);
+            const label = (await button.textContent().catch(() => '') || '').trim();
+            if (label.length > 0 && /@|continue as|use account|choose/i.test(label) && await button.isVisible().catch(() => false)) {
+                await button.click({ timeout: 1500 });
+                logger(`Advanced Codex OAuth handoff by selecting account option ${label}.`);
+                return;
+            }
+        }
+    } catch {}
+}
+
 async function runPostSignupCodexOAuthOrchestrator(options) {
     const {
         context,
@@ -330,6 +381,8 @@ async function runPostSignupCodexOAuthOrchestrator(options) {
     const deadlineMs = startedAtMs + pollTimeoutMs;
     while (true) {
         pollCount += 1;
+
+        await attemptProviderPageProgress(providerPage, logger);
 
         try {
             latestStatusPayload = await managementClient.getAuthStatus(attemptState);

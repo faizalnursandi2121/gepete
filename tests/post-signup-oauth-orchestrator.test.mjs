@@ -27,7 +27,8 @@ function createConfig(overrides = {}) {
 
 function createFakePersistentContext(options = {}) {
     const {
-        gotoError = null
+        gotoError = null,
+        controls = []
     } = options;
 
     const pages = [{ kind: 'original-chatgpt-page' }];
@@ -48,11 +49,63 @@ function createFakePersistentContext(options = {}) {
                         url,
                         gotoOptions
                     };
+                },
+                getByRole(role, options = {}) {
+                    const namePattern = options.name;
+                    const matches = controls.filter((control) => {
+                        if (control.role !== role) {
+                            return false;
+                        }
+
+                        if (!namePattern) {
+                            return true;
+                        }
+
+                        return namePattern instanceof RegExp
+                            ? namePattern.test(control.label)
+                            : control.label === namePattern;
+                    });
+
+                    return makeFakeLocator(matches);
+                },
+                locator(selector) {
+                    const matches = controls.filter((control) => control.selector === selector);
+                    return makeFakeLocator(matches);
                 }
             };
 
             pages.push(page);
             return page;
+        }
+    };
+}
+
+function makeFakeLocator(matches) {
+    return {
+        async count() {
+            return matches.length;
+        },
+        first() {
+            return makeFakeElement(matches[0]);
+        },
+        nth(index) {
+            return makeFakeElement(matches[index]);
+        }
+    };
+}
+
+function makeFakeElement(match) {
+    return {
+        async isVisible() {
+            return Boolean(match?.visible);
+        },
+        async click() {
+            if (match && typeof match.onClick === 'function') {
+                await match.onClick();
+            }
+        },
+        async textContent() {
+            return match?.label ?? '';
         }
     };
 }
@@ -459,4 +512,51 @@ test('orchestrator fails closed when CLIProxy reports success but durability sna
     assert.equal(result.durability.changed, false);
     assert.equal(result.durability.confirmed, false);
     assert.deepEqual(calls, ['snapshot', 'start', 'status', 'snapshot']);
+});
+
+test('orchestrator attempts to advance provider handoff while status remains pending', async () => {
+    const clicks = [];
+    const context = createFakePersistentContext({
+        controls: [
+            {
+                role: 'button',
+                label: 'Continue',
+                visible: true,
+                onClick: () => clicks.push('continue')
+            }
+        ]
+    });
+
+    const managementClient = {
+        async getAuthFilesSnapshot() {
+            return { authFiles: [] };
+        },
+        async startCodexAuth() {
+            return {
+                url: 'https://auth.openai.example/authorize?state=opaque-state',
+                state: 'opaque-state'
+            };
+        },
+        async getAuthStatus() {
+            return {
+                status: 'wait',
+                state: 'opaque-state'
+            };
+        }
+    };
+
+    const result = await runPostSignupCodexOAuthOrchestrator({
+        context,
+        managementClient,
+        config: createConfig({
+            cliproxy_poll_interval_ms: 5,
+            cliproxy_poll_timeout_ms: 12
+        }),
+        sleepImpl: async () => {},
+        now: createStepClock(5).now
+    });
+
+    assert.equal(result.status, 'timeout');
+    assert.equal(result.code, 'auth_timeout');
+    assert.deepEqual(clicks, ['continue', 'continue']);
 });
