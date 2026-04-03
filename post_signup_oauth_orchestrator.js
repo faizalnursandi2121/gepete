@@ -185,12 +185,14 @@ async function attemptProviderPageProgress(providerPage, logger) {
     }
 
     const candidateLocators = [
-        providerPage.getByRole('button', { name: /continue/i }),
+        providerPage.getByRole('button', { name: /continue as/i }),
+        providerPage.getByRole('button', { name: /use account/i }),
+        providerPage.getByRole('button', { name: /choose/i }),
         providerPage.getByRole('button', { name: /authorize/i }),
         providerPage.getByRole('button', { name: /allow/i }),
         providerPage.getByRole('button', { name: /approve/i }),
-        providerPage.getByRole('button', { name: /continue as/i }),
         providerPage.getByRole('button', { name: /accept/i }),
+        providerPage.getByRole('button', { name: /continue/i }),
         providerPage.getByRole('link', { name: /continue/i }),
         providerPage.getByRole('link', { name: /authorize/i }),
         providerPage.locator('button[data-testid*="continue"]'),
@@ -234,6 +236,15 @@ async function attemptProviderPageProgress(providerPage, logger) {
     return snapshot;
 }
 
+function describeProviderSnapshot(snapshot) {
+    const [url = '', title = '', bodyText = ''] = String(snapshot || '').split('::');
+    return {
+        url,
+        title,
+        bodyPreview: bodyText.slice(0, 180)
+    };
+}
+
 async function runPostSignupCodexOAuthOrchestrator(options) {
     const {
         context,
@@ -267,6 +278,7 @@ async function runPostSignupCodexOAuthOrchestrator(options) {
     let preAuthSnapshot = null;
     let postAuthSnapshot = null;
     let latestStatusPayload = null;
+    let lastProviderSnapshot = null;
 
     const baseSecrets = [
         typeof config.cliproxy_management_key === 'string' ? config.cliproxy_management_key : null
@@ -403,7 +415,12 @@ async function runPostSignupCodexOAuthOrchestrator(options) {
     while (true) {
         pollCount += 1;
 
-        await attemptProviderPageProgress(providerPage, logger);
+        const providerSnapshot = await attemptProviderPageProgress(providerPage, logger);
+        if (providerSnapshot && providerSnapshot !== lastProviderSnapshot) {
+            const snapshotInfo = describeProviderSnapshot(providerSnapshot);
+            logger(`Observed Codex OAuth page state: ${snapshotInfo.url || 'unknown-url'} | ${snapshotInfo.title || 'untitled'} | ${snapshotInfo.bodyPreview}`);
+            lastProviderSnapshot = providerSnapshot;
+        }
 
         try {
             latestStatusPayload = await managementClient.getAuthStatus(attemptState);
