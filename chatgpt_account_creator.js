@@ -205,7 +205,7 @@ class ChatGPTAccountCreator {
 
     generateRandomBirthday() {
         const today = new Date();
-        const minYear = today.getFullYear() - 65;
+        const minYear = 2000;
         const maxYear = today.getFullYear() - 18;
 
         const year = Math.floor(Math.random() * (maxYear - minYear + 1)) + minYear;
@@ -840,15 +840,17 @@ class ChatGPTAccountCreator {
                 }
 
                 const secondStep = await this.detectAuthStep(page);
-                if (secondStep.step !== 'password') {
+                if (secondStep.step === 'password') {
+                    this.log('✅ Password step detected after verification code');
+                    const passwordFilled = await this.fillPasswordStep(page, password, accountNumber);
+                    if (!passwordFilled) {
+                        return false;
+                    }
+                } else if (secondStep.url?.includes('about') || secondStep.url?.includes('chatgpt.com')) {
+                    this.log(`✅ Proceeding directly to post-verification onboarding step (${secondStep.url}).`);
+                } else {
                     this.log(`❌ Expected password step after email verification but detected ${secondStep.step}. URL: ${secondStep.url}. Title: ${secondStep.title || 'n/a'}. Body preview: ${(secondStep.bodyPreview || '').slice(0, 200)}`);
                     await this.takeDebugScreenshot(page, `password_after_code_missing_${accountNumber}`);
-                    return false;
-                }
-
-                this.log('✅ Password step detected after verification code');
-                const passwordFilled = await this.fillPasswordStep(page, password, accountNumber);
-                if (!passwordFilled) {
                     return false;
                 }
             } else {
@@ -857,25 +859,26 @@ class ChatGPTAccountCreator {
                 return false;
             }
 
-            // Click Continue after password
-            const passwordSubmitted = await this.submitContinueStep(page, accountNumber, 'password');
-            if (!passwordSubmitted) {
-                return false;
-            }
-
-            const postPasswordStep = await this.detectAuthStep(page);
-            if (postPasswordStep.step === 'verification_code') {
-                this.log('✅ Verification code step detected after password');
-                const codeCompleted = await this.completeVerificationCodeStep(page, email, accountNumber, context);
-                if (!codeCompleted) {
+            if (firstStep.step === 'password' || (firstStep.step === 'verification_code' && !page.url().includes('about'))) {
+                const passwordSubmitted = await this.submitContinueStep(page, accountNumber, 'password');
+                if (!passwordSubmitted) {
                     return false;
                 }
-            } else if (postPasswordStep.step === 'password') {
-                this.log('⚠️ Password step still visible after submit, continuing with current flow.', 'WARNING');
-            } else if (!page.url().includes('about') && !page.url().includes('chatgpt.com')) {
-                this.log(`❌ Unexpected post-password state. URL: ${postPasswordStep.url}. Title: ${postPasswordStep.title || 'n/a'}. Body preview: ${(postPasswordStep.bodyPreview || '').slice(0, 200)}`);
-                await this.takeDebugScreenshot(page, `unexpected_post_password_state_${accountNumber}`);
-                return false;
+
+                const postPasswordStep = await this.detectAuthStep(page);
+                if (postPasswordStep.step === 'verification_code') {
+                    this.log('✅ Verification code step detected after password');
+                    const codeCompleted = await this.completeVerificationCodeStep(page, email, accountNumber, context);
+                    if (!codeCompleted) {
+                        return false;
+                    }
+                } else if (postPasswordStep.step === 'password') {
+                    this.log('⚠️ Password step still visible after submit, continuing with current flow.', 'WARNING');
+                } else if (!page.url().includes('about') && !page.url().includes('chatgpt.com')) {
+                    this.log(`❌ Unexpected post-password state. URL: ${postPasswordStep.url}. Title: ${postPasswordStep.title || 'n/a'}. Body preview: ${(postPasswordStep.bodyPreview || '').slice(0, 200)}`);
+                    await this.takeDebugScreenshot(page, `unexpected_post_password_state_${accountNumber}`);
+                    return false;
+                }
             }
 
             // Fill name on about-you page
