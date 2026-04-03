@@ -270,7 +270,12 @@ class ChatGPTAccountCreator {
         if (cliproxyEnabled) {
             this.log('🔐 ChatGPT signup checkpoint passed; starting CLIProxy Codex OAuth durability gate before local persistence.');
             const orchestrator = this.createPostSignupOAuthOrchestrator();
-            const orchestrationResult = await orchestrator.run({ context });
+            const orchestrationResult = await orchestrator.run({
+                context,
+                email,
+                password,
+                totpSecret
+            });
 
             if (orchestrationResult.status !== 'success' || orchestrationResult.code !== 'success') {
                 this.log(

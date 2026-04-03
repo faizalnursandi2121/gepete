@@ -1,3 +1,5 @@
+import * as OTPAuth from 'otpauth';
+
 import { createCLIProxyManagementClient } from './cliproxy_management_client.js';
 
 const DEFAULT_POLL_INTERVAL_MS = 2000;
@@ -245,10 +247,81 @@ function describeProviderSnapshot(snapshot) {
     };
 }
 
+function generateTotpCode(secret) {
+    if (typeof secret !== 'string' || secret.trim().length === 0) {
+        return null;
+    }
+
+    try {
+        const totp = new OTPAuth.TOTP({
+            issuer: 'OpenAI',
+            label: 'CLIProxy OAuth',
+            algorithm: 'SHA1',
+            digits: 6,
+            period: 30,
+            secret: OTPAuth.Secret.fromBase32(secret)
+        });
+        return totp.generate();
+    } catch {
+        return null;
+    }
+}
+
+async function maybeCompleteOpenAILogin(providerPage, logger, authContext) {
+    if (!providerPage || !authContext) {
+        return false;
+    }
+
+    const pageUrl = (() => {
+        try {
+            return typeof providerPage.url === 'function' ? providerPage.url() : '';
+        } catch {
+            return '';
+        }
+    })();
+
+    if (typeof pageUrl === 'string' && pageUrl.includes('/log-in')) {
+        const emailInput = providerPage.locator('input[type="email"], input[name="username"], input[autocomplete="username"]');
+        if (await emailInput.count() > 0 && await emailInput.first().isVisible().catch(() => false)) {
+            await emailInput.first().click();
+            await emailInput.first().fill(authContext.email);
+            logger(`Filled OpenAI OAuth email ${authContext.email}.`);
+            providerPage.__lastInteractionSnapshot = null;
+            return true;
+        }
+    }
+
+    const passwordInput = providerPage.locator('input[type="password"], input[autocomplete="current-password"]');
+    if (await passwordInput.count() > 0 && await passwordInput.first().isVisible().catch(() => false)) {
+        await passwordInput.first().click();
+        await passwordInput.first().fill(authContext.password);
+        logger('Filled OpenAI OAuth password.');
+        providerPage.__lastInteractionSnapshot = null;
+        return true;
+    }
+
+    const totpInput = providerPage.locator('input[name="code"], input[name="totp_otp"], input[inputmode="numeric"], input[autocomplete="one-time-code"]');
+    if (await totpInput.count() > 0 && await totpInput.first().isVisible().catch(() => false)) {
+        const otpCode = generateTotpCode(authContext.totpSecret);
+        if (otpCode) {
+            await totpInput.first().click();
+            await totpInput.first().fill(otpCode);
+            logger('Filled OpenAI OAuth TOTP code.');
+            providerPage.__lastInteractionSnapshot = null;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 async function runPostSignupCodexOAuthOrchestrator(options) {
     const {
         context,
         managementClient,
+        email,
+        password,
+        totpSecret,
         config = {},
         logger = () => {},
         sleepImpl = sleep,
@@ -283,6 +356,11 @@ async function runPostSignupCodexOAuthOrchestrator(options) {
     const baseSecrets = [
         typeof config.cliproxy_management_key === 'string' ? config.cliproxy_management_key : null
     ];
+    const authContext = {
+        email,
+        password,
+        totpSecret
+    };
 
     function buildResult(status, code, extra = {}) {
         const secrets = [...baseSecrets, providerUrl, attemptState];
@@ -415,6 +493,7 @@ async function runPostSignupCodexOAuthOrchestrator(options) {
     while (true) {
         pollCount += 1;
 
+        await maybeCompleteOpenAILogin(providerPage, logger, authContext);
         const providerSnapshot = await attemptProviderPageProgress(providerPage, logger);
         if (providerSnapshot && providerSnapshot !== lastProviderSnapshot) {
             const snapshotInfo = describeProviderSnapshot(providerSnapshot);
