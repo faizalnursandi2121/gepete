@@ -150,9 +150,12 @@ function hasDurabilityConfirmation(durabilityDiff) {
 }
 
 function getNormalizedStatus(statusPayload) {
-    return typeof statusPayload?.status === 'string'
-        ? statusPayload.status.trim().toLowerCase()
-        : null;
+    if (typeof statusPayload?.status !== 'string') {
+        return null;
+    }
+
+    const normalized = statusPayload.status.trim().toLowerCase();
+    return normalized === 'wait' ? 'pending' : normalized;
 }
 
 function isTerminalFailureStatus(status) {
