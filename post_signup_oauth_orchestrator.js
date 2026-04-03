@@ -70,11 +70,17 @@ function normalizeAuthFilesSnapshot(snapshot) {
         throw new Error('CLIProxy auth-files snapshot must be a JSON object.');
     }
 
-    if (!Array.isArray(snapshot.authFiles)) {
-        throw new Error('CLIProxy auth-files snapshot must include an authFiles array.');
+    const rawAuthFiles = Array.isArray(snapshot.authFiles)
+        ? snapshot.authFiles
+        : Array.isArray(snapshot.files)
+            ? snapshot.files
+            : null;
+
+    if (!Array.isArray(rawAuthFiles)) {
+        throw new Error('CLIProxy auth-files snapshot must include an authFiles or files array.');
     }
 
-    const authFiles = snapshot.authFiles.map((entry, index) => normalizeAuthFileEntry(entry, index));
+    const authFiles = rawAuthFiles.map((entry, index) => normalizeAuthFileEntry(entry, index));
     const jsonArtifactPaths = authFiles
         .filter((entry) => entry.isJsonArtifact)
         .map((entry) => entry.path)
