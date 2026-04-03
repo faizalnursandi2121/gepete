@@ -167,10 +167,17 @@ async function attemptProviderPageProgress(providerPage, logger) {
         return null;
     }
 
+    const snapshotUrl = (() => {
+        try {
+            return typeof providerPage.url === 'function' ? providerPage.url() : '';
+        } catch {
+            return '';
+        }
+    })();
     const snapshot = await Promise.all([
-        providerPage.url().catch(() => ''),
-        providerPage.title().catch(() => ''),
-        providerPage.evaluate(() => document.body?.innerText?.replace(/\s+/g, ' ').trim().slice(0, 300) || '').catch(() => '')
+        Promise.resolve(snapshotUrl),
+        Promise.resolve(providerPage.title?.()).catch(() => ''),
+        Promise.resolve(providerPage.evaluate?.(() => document.body?.innerText?.replace(/\s+/g, ' ').trim().slice(0, 300) || '')).catch(() => '')
     ]).then(([url, title, bodyText]) => `${url}::${title}::${bodyText}`);
 
     if (providerPage.__lastInteractionSnapshot === snapshot) {
