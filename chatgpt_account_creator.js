@@ -353,6 +353,111 @@ class ChatGPTAccountCreator {
         return null;
     }
 
+    async detectAuthStep(page) {
+        const currentUrl = page.url();
+
+        const selectors = {
+            password: page.locator('input[type="password"]'),
+            code: page.locator('input[name="code"], input[inputmode="numeric"], input[autocomplete="one-time-code"]')
+        };
+
+        for (let attempt = 0; attempt < 10; attempt++) {
+            if (await selectors.password.count() > 0 && await selectors.password.first().isVisible().catch(() => false)) {
+                return { step: 'password', url: page.url() };
+            }
+
+            if (await selectors.code.count() > 0 && await selectors.code.first().isVisible().catch(() => false)) {
+                return { step: 'verification_code', url: page.url() };
+            }
+
+            await this.sleep(1500);
+        }
+
+        const title = await page.title().catch(() => '');
+        const bodyPreview = await page.evaluate(() => document.body?.innerText?.replace(/\s+/g, ' ').trim().slice(0, 500) || '').catch(() => '');
+        return {
+            step: 'unknown',
+            url: currentUrl,
+            title,
+            bodyPreview
+        };
+    }
+
+    async fillPasswordStep(page, password, accountNumber) {
+        this.log("🔑 Setting up password");
+        try {
+            const passwordInput = page.locator('input[type="password"]');
+            await passwordInput.waitFor({ state: 'visible', timeout: 15000 });
+            await passwordInput.click();
+            await page.keyboard.type(password, { delay: 30 });
+            await this.sleep(this.randomFloat(1000, 2000));
+            return true;
+        } catch (e) {
+            this.log(`❌ Error filling password: ${e.message}`);
+            await this.takeDebugScreenshot(page, `password_error_${accountNumber}`);
+            return false;
+        }
+    }
+
+    async submitContinueStep(page, accountNumber, label) {
+        try {
+            const continueButton = page.getByRole('button', { name: 'Continue', exact: true });
+            await continueButton.waitFor({ state: 'visible', timeout: 10000 });
+            await continueButton.click({ timeout: 10000 });
+            await this.sleep(this.randomFloat(4000, 6000));
+
+            if (page.url().includes('/error') || page.url().includes('challenge')) {
+                this.log(`⚠️ Cloudflare challenge after ${label}, attempting...`);
+                try {
+                    const iframeEl = page.locator('iframe[src*="challenges.cloudflare.com"]');
+                    const box = await iframeEl.boundingBox({ timeout: 5000 });
+                    if (box) {
+                        await page.mouse.click(box.x + 25, box.y + box.height / 2);
+                        await this.sleep(10000);
+                    }
+                } catch {
+                    await this.takeDebugScreenshot(page, `${label}_turnstile_error_${accountNumber}`);
+                    return false;
+                }
+            }
+
+            return true;
+        } catch (e) {
+            this.log(`❌ Error clicking Continue after ${label}: ${e.message}`);
+            await this.takeDebugScreenshot(page, `continue_${label}_error_${accountNumber}`);
+            return false;
+        }
+    }
+
+    async completeVerificationCodeStep(page, email, accountNumber, context) {
+        this.log("⏳ Waiting for verification code...");
+        await this.sleep(5000);
+
+        const verificationCode = await this.getVerificationCode(email);
+
+        if (!verificationCode) {
+            this.log(`❌ Failed to get verification code for ${email}`, "ERROR");
+            await this.takeDebugScreenshot(page, `no_code_${accountNumber}`);
+            await context.close();
+            return false;
+        }
+
+        this.log(`✅ Got code: ${verificationCode}`);
+        try {
+            const codeInput = page.locator('input[name="code"], input[inputmode="numeric"], input[autocomplete="one-time-code"]');
+            await codeInput.first().waitFor({ state: 'visible', timeout: 10000 });
+            await codeInput.first().click();
+            await page.keyboard.type(verificationCode, { delay: 50 });
+            await this.sleep(1000);
+        } catch (e) {
+            this.log(`❌ Error entering verification code: ${e.message}`);
+            await this.takeDebugScreenshot(page, `code_input_error_${accountNumber}`);
+            return false;
+        }
+
+        return this.submitContinueStep(page, accountNumber, 'code');
+    }
+
     async takeDebugScreenshot(page, label) {
         try {
             const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -709,9 +814,7 @@ class ChatGPTAccountCreator {
                 }
 
                 const afterUrl = page.url();
-                if (afterUrl.includes('password') || afterUrl.includes('auth.openai.com')) {
-                    this.log(`✅ Navigated to password page`);
-                } else if (afterUrl.includes('/error')) {
+                if (afterUrl.includes('/error')) {
                     this.log(`❌ Auth error: ${afterUrl}`);
                     await this.takeDebugScreenshot(page, `auth_error_${accountNumber}`);
                     return false;
@@ -722,83 +825,56 @@ class ChatGPTAccountCreator {
                 return false;
             }
 
-            // Fill password
-            this.log("🔑 Setting up password");
-            try {
-                const passwordInput = page.locator('input[type="password"]');
-                await passwordInput.waitFor({ state: 'visible', timeout: 15000 });
-                await passwordInput.click();
-                await page.keyboard.type(password, { delay: 30 });
-                await this.sleep(this.randomFloat(1000, 2000));
-            } catch (e) {
-                this.log(`❌ Error filling password: ${e.message}`);
-                await this.takeDebugScreenshot(page, `password_error_${accountNumber}`);
+            const firstStep = await this.detectAuthStep(page);
+            if (firstStep.step === 'password') {
+                this.log('✅ Next auth step detected: password');
+                const passwordFilled = await this.fillPasswordStep(page, password, accountNumber);
+                if (!passwordFilled) {
+                    return false;
+                }
+            } else if (firstStep.step === 'verification_code') {
+                this.log('✅ Next auth step detected: verification code');
+                const codeCompleted = await this.completeVerificationCodeStep(page, email, accountNumber, context);
+                if (!codeCompleted) {
+                    return false;
+                }
+
+                const secondStep = await this.detectAuthStep(page);
+                if (secondStep.step !== 'password') {
+                    this.log(`❌ Expected password step after email verification but detected ${secondStep.step}. URL: ${secondStep.url}. Title: ${secondStep.title || 'n/a'}. Body preview: ${(secondStep.bodyPreview || '').slice(0, 200)}`);
+                    await this.takeDebugScreenshot(page, `password_after_code_missing_${accountNumber}`);
+                    return false;
+                }
+
+                this.log('✅ Password step detected after verification code');
+                const passwordFilled = await this.fillPasswordStep(page, password, accountNumber);
+                if (!passwordFilled) {
+                    return false;
+                }
+            } else {
+                this.log(`❌ Could not determine next auth step. URL: ${firstStep.url}. Title: ${firstStep.title || 'n/a'}. Body preview: ${(firstStep.bodyPreview || '').slice(0, 200)}`);
+                await this.takeDebugScreenshot(page, `unknown_auth_step_${accountNumber}`);
                 return false;
             }
 
             // Click Continue after password
-            try {
-                const continueButton = page.getByRole('button', { name: 'Continue', exact: true });
-                await continueButton.waitFor({ state: 'visible', timeout: 10000 });
-                await continueButton.click({ timeout: 10000 });
-                await this.sleep(this.randomFloat(6000, 8000));
+            const passwordSubmitted = await this.submitContinueStep(page, accountNumber, 'password');
+            if (!passwordSubmitted) {
+                return false;
+            }
 
-                // Handle Turnstile again if needed
-                if (page.url().includes('/error') || page.url().includes('challenge')) {
-                    this.log("⚠️ Cloudflare challenge after password, attempting...");
-                    try {
-                        const iframeEl = page.locator('iframe[src*="challenges.cloudflare.com"]');
-                        const box = await iframeEl.boundingBox({ timeout: 5000 });
-                        if (box) {
-                            await page.mouse.click(box.x + 25, box.y + box.height / 2);
-                            await this.sleep(10000);
-                        }
-                    } catch {
-                        await this.takeDebugScreenshot(page, `turnstile_pw_error_${accountNumber}`);
-                        return false;
-                    }
+            const postPasswordStep = await this.detectAuthStep(page);
+            if (postPasswordStep.step === 'verification_code') {
+                this.log('✅ Verification code step detected after password');
+                const codeCompleted = await this.completeVerificationCodeStep(page, email, accountNumber, context);
+                if (!codeCompleted) {
+                    return false;
                 }
-            } catch (e) {
-                this.log(`❌ Error clicking Continue after password: ${e.message}`);
-                await this.takeDebugScreenshot(page, `continue_password_error_${accountNumber}`);
-                return false;
-            }
-
-            // Wait for verification code
-            this.log("⏳ Waiting for verification code...");
-            await this.sleep(5000);
-
-            const verificationCode = await this.getVerificationCode(email);
-
-            if (!verificationCode) {
-                this.log(`❌ Failed to get verification code for ${email}`, "ERROR");
-                await this.takeDebugScreenshot(page, `no_code_${accountNumber}`);
-                await context.close();
-                return false;
-            }
-
-            // Enter verification code
-            this.log(`✅ Got code: ${verificationCode}`);
-            try {
-                const codeInput = page.locator('input[name="code"]');
-                await codeInput.waitFor({ state: 'visible', timeout: 10000 });
-                await codeInput.click();
-                await page.keyboard.type(verificationCode, { delay: 50 });
-                await this.sleep(1000);
-            } catch (e) {
-                this.log(`❌ Error entering verification code: ${e.message}`);
-                await this.takeDebugScreenshot(page, `code_input_error_${accountNumber}`);
-                return false;
-            }
-
-            // Click Continue after code
-            try {
-                const continueButton = page.getByRole('button', { name: 'Continue', exact: true });
-                await continueButton.click({ timeout: 10000 });
-                await this.sleep(this.randomFloat(4000, 6000));
-            } catch (e) {
-                this.log(`❌ Error clicking Continue after code: ${e.message}`);
-                await this.takeDebugScreenshot(page, `continue_code_error_${accountNumber}`);
+            } else if (postPasswordStep.step === 'password') {
+                this.log('⚠️ Password step still visible after submit, continuing with current flow.', 'WARNING');
+            } else if (!page.url().includes('about') && !page.url().includes('chatgpt.com')) {
+                this.log(`❌ Unexpected post-password state. URL: ${postPasswordStep.url}. Title: ${postPasswordStep.title || 'n/a'}. Body preview: ${(postPasswordStep.bodyPreview || '').slice(0, 200)}`);
+                await this.takeDebugScreenshot(page, `unexpected_post_password_state_${accountNumber}`);
                 return false;
             }
 
