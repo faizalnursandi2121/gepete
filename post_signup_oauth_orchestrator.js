@@ -279,6 +279,13 @@ async function maybeCompleteOpenAILogin(providerPage, logger, authContext) {
             return '';
         }
     })();
+    const title = await Promise.resolve(providerPage.title?.()).catch(() => '');
+    const bodyPreview = await Promise.resolve(providerPage.evaluate?.(() => document.body?.innerText?.replace(/\s+/g, ' ').trim().slice(0, 300) || '')).catch(() => '');
+    const loginSnapshot = `${pageUrl}::${title}::${bodyPreview}`;
+
+    if (providerPage.__lastLoginInteractionSnapshot === loginSnapshot) {
+        return false;
+    }
 
     if (typeof pageUrl === 'string' && pageUrl.includes('/log-in')) {
         const emailInput = providerPage.locator('input[type="email"], input[name="username"], input[autocomplete="username"]');
@@ -287,28 +294,41 @@ async function maybeCompleteOpenAILogin(providerPage, logger, authContext) {
             await emailInput.first().fill(authContext.email);
             logger(`Filled OpenAI OAuth email ${authContext.email}.`);
             providerPage.__lastInteractionSnapshot = null;
+            providerPage.__lastLoginInteractionSnapshot = loginSnapshot;
             return true;
         }
     }
 
     const passwordInput = providerPage.locator('input[type="password"], input[autocomplete="current-password"]');
     if (await passwordInput.count() > 0 && await passwordInput.first().isVisible().catch(() => false)) {
-        await passwordInput.first().click();
-        await passwordInput.first().fill(authContext.password);
-        logger('Filled OpenAI OAuth password.');
-        providerPage.__lastInteractionSnapshot = null;
-        return true;
+        const passwordField = passwordInput.first();
+        const passwordValue = await passwordField.inputValue().catch(() => '');
+        const isEnabled = await passwordField.isEnabled().catch(() => false);
+        if (isEnabled && passwordValue.length === 0) {
+            await passwordField.click();
+            await passwordField.fill(authContext.password);
+            logger('Filled OpenAI OAuth password.');
+            providerPage.__lastInteractionSnapshot = null;
+            providerPage.__lastLoginInteractionSnapshot = loginSnapshot;
+            return true;
+        }
     }
 
     const totpInput = providerPage.locator('input[name="code"], input[name="totp_otp"], input[inputmode="numeric"], input[autocomplete="one-time-code"]');
     if (await totpInput.count() > 0 && await totpInput.first().isVisible().catch(() => false)) {
         const otpCode = generateTotpCode(authContext.totpSecret);
         if (otpCode) {
-            await totpInput.first().click();
-            await totpInput.first().fill(otpCode);
-            logger('Filled OpenAI OAuth TOTP code.');
-            providerPage.__lastInteractionSnapshot = null;
-            return true;
+            const otpField = totpInput.first();
+            const otpValue = await otpField.inputValue().catch(() => '');
+            const isEnabled = await otpField.isEnabled().catch(() => false);
+            if (isEnabled && otpValue.length === 0) {
+                await otpField.click();
+                await otpField.fill(otpCode);
+                logger('Filled OpenAI OAuth TOTP code.');
+                providerPage.__lastInteractionSnapshot = null;
+                providerPage.__lastLoginInteractionSnapshot = loginSnapshot;
+                return true;
+            }
         }
     }
 
