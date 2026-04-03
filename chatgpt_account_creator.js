@@ -294,7 +294,7 @@ class ChatGPTAccountCreator {
         return true;
     }
 
-    async getVerificationCode(email, maxRetries = 5, delay = 2) {
+    async getVerificationCode(email, maxRetries = 15, delay = 4) {
         // Extract username and domain from email
         const [username, domain] = email.split('@');
 
@@ -311,23 +311,29 @@ class ChatGPTAccountCreator {
                     redirect: 'follow'
                 });
 
-                const text = await response.text();
-                const $ = cheerio.load(text);
+                const html = await response.text();
+                const $ = cheerio.load(html);
 
-                // Try to get verification code from email content
-                const otpText = $("#email-table > div.e7m.list-group-item.list-group-item-info > div.e7m.subj_div_45g45gg").text().trim();
+                const candidateTexts = [
+                    $("#email-table > div.e7m.list-group-item.list-group-item-info > div.e7m.subj_div_45g45gg").text().trim(),
+                    $("#email-table").text().trim(),
+                    $('body').text().replace(/\s+/g, ' ').trim(),
+                    html
+                ].filter(Boolean);
 
-                if (otpText && otpText.length > 0) {
-                    // Extract numeric code if present
-                    const codeMatch = otpText.match(/\d{6}/);
+                for (const candidateText of candidateTexts) {
+                    const codeMatch = candidateText.match(/\b\d{6}\b/);
                     if (codeMatch) {
                         const code = codeMatch[0];
                         this.log(`✅ Retrieved verification code: ${code}`);
                         return code;
-                    } else if (/^\d+$/.test(otpText)) {
-                        this.log(`✅ Retrieved verification code: ${otpText}`);
-                        return otpText;
                     }
+                }
+
+                const mailboxPreview = ($('body').text().replace(/\s+/g, ' ').trim() || html.replace(/\s+/g, ' ').trim())
+                    .slice(0, 300);
+                if (mailboxPreview.length > 0) {
+                    this.log(`⚠️ No verification code found yet. Mailbox preview: ${mailboxPreview}...`, 'WARNING');
                 }
 
                 if (attempt < maxRetries - 1) {
