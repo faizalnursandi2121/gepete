@@ -1,0 +1,13 @@
+{
+  "max_workers": 10,
+  "headless": true,
+  "slow_mo": 2000,
+  "timeout": 30000,
+  "password": "REPLACE_WITH_A_PASSWORD_AT_LEAST_12_CHARACTERS",
+  "cliproxy_enable_codex_oauth": false,
+  "cliproxy_base_url": "",
+  "cliproxy_management_key": "",
+  "cliproxy_management_auth_mode": "bearer",
+  "cliproxy_poll_interval_ms": 2000,
+  "cliproxy_poll_timeout_ms": 180000
+}

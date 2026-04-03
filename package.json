@@ -1,0 +1,22 @@
+{
+    "name": "chatgpt-account-creator",
+    "version": "1.0.0",
+    "description": "ChatGPT Account Creator Automation Script using Playwright",
+    "type": "module",
+    "main": "chatgpt_account_creator.js",
+    "scripts": {
+        "start": "node chatgpt_account_creator.js",
+        "test": "node --test",
+        "install-browsers": "npx playwright install firefox"
+    },
+    "dependencies": {
+        "@faker-js/faker": "^10.1.0",
+        "cheerio": "^1.0.0",
+        "otpauth": "^9.5.0",
+        "playwright": "^1.57.0",
+        "uuid": "^9.0.0"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    }
+}
