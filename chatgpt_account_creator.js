@@ -919,10 +919,12 @@ class ChatGPTAccountCreator {
                     await page.keyboard.type(`${monthStr}${dayStr}${yearStr}`, { delay: 80 });
                     await this.sleep(500);
                 } else {
-                    const monthField = page.locator('select[name*="month" i], input[name*="month" i], input[placeholder*="month" i]').first();
-                    const dayField = page.locator('select[name*="day" i], input[name*="day" i], input[placeholder*="day" i]').first();
-                    const yearField = page.locator('select[name*="year" i], input[name*="year" i], input[placeholder*="year" i]').first();
+                    const monthField = page.locator('select[name*="month" i], input[name*="month" i], input[placeholder*="month" i], [aria-label*="month" i]').first();
+                    const dayField = page.locator('select[name*="day" i], input[name*="day" i], input[placeholder*="day" i], [aria-label*="day" i]').first();
+                    const yearField = page.locator('select[name*="year" i], input[name*="year" i], input[placeholder*="year" i], [aria-label*="year" i]').first();
                     const dateField = page.locator('input[type="date"], input[name*="birth" i], input[placeholder*="birthday" i]').first();
+                    const aboutYouComboboxes = page.locator('select, [role="combobox"]');
+                    const aboutYouTextboxes = page.locator('input[type="text"], input:not([type]), [role="textbox"]');
 
                     if (await dateField.count() > 0 && await dateField.isVisible().catch(() => false)) {
                         await dateField.fill(`${yearStr}-${monthStr}-${dayStr}`);
@@ -942,6 +944,30 @@ class ChatGPTAccountCreator {
                         await this.sleep(200);
                         await yearField.click();
                         await yearField.fill(yearStr).catch(async () => page.keyboard.type(yearStr, { delay: 50 }));
+                    } else if (await aboutYouComboboxes.count() >= 3) {
+                        const monthBox = aboutYouComboboxes.nth(0);
+                        const dayBox = aboutYouComboboxes.nth(1);
+                        const yearBox = aboutYouComboboxes.nth(2);
+                        await monthBox.click();
+                        await page.keyboard.type(monthStr, { delay: 50 });
+                        await this.sleep(200);
+                        await dayBox.click();
+                        await page.keyboard.type(dayStr, { delay: 50 });
+                        await this.sleep(200);
+                        await yearBox.click();
+                        await page.keyboard.type(yearStr, { delay: 50 });
+                    } else if (await aboutYouTextboxes.count() >= 3) {
+                        const monthBox = aboutYouTextboxes.nth(0);
+                        const dayBox = aboutYouTextboxes.nth(1);
+                        const yearBox = aboutYouTextboxes.nth(2);
+                        await monthBox.click();
+                        await monthBox.fill(monthStr).catch(async () => page.keyboard.type(monthStr, { delay: 50 }));
+                        await this.sleep(200);
+                        await dayBox.click();
+                        await dayBox.fill(dayStr).catch(async () => page.keyboard.type(dayStr, { delay: 50 }));
+                        await this.sleep(200);
+                        await yearBox.click();
+                        await yearBox.fill(yearStr).catch(async () => page.keyboard.type(yearStr, { delay: 50 }));
                     } else {
                         throw new Error('No supported birthday input pattern detected');
                     }
