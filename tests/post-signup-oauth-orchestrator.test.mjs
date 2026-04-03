@@ -33,6 +33,9 @@ function createFakePersistentContext(options = {}) {
 
     const pages = [{ kind: 'original-chatgpt-page' }];
     const gotoCalls = [];
+    let currentUrl = 'https://auth.openai.example/authorize?state=opaque-state';
+    let currentTitle = 'Authorize OpenAI';
+    let currentBodyText = controls.map((control) => control.label).join(' ');
 
     return {
         pages,
@@ -41,6 +44,7 @@ function createFakePersistentContext(options = {}) {
             const page = {
                 async goto(url, gotoOptions) {
                     gotoCalls.push({ url, gotoOptions });
+                    currentUrl = url;
                     if (gotoError) {
                         throw gotoError;
                     }
@@ -49,6 +53,18 @@ function createFakePersistentContext(options = {}) {
                         url,
                         gotoOptions
                     };
+                },
+                async url() {
+                    return currentUrl;
+                },
+                async title() {
+                    return currentTitle;
+                },
+                async evaluate(fn) {
+                    if (typeof fn === 'function') {
+                        return currentBodyText;
+                    }
+                    return currentBodyText;
                 },
                 getByRole(role, options = {}) {
                     const namePattern = options.name;
@@ -558,5 +574,5 @@ test('orchestrator attempts to advance provider handoff while status remains pen
 
     assert.equal(result.status, 'timeout');
     assert.equal(result.code, 'auth_timeout');
-    assert.deepEqual(clicks, ['continue', 'continue']);
+    assert.deepEqual(clicks, ['continue']);
 });

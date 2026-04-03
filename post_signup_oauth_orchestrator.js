@@ -164,7 +164,17 @@ function isTerminalFailureStatus(status) {
 
 async function attemptProviderPageProgress(providerPage, logger) {
     if (!providerPage) {
-        return;
+        return null;
+    }
+
+    const snapshot = await Promise.all([
+        providerPage.url().catch(() => ''),
+        providerPage.title().catch(() => ''),
+        providerPage.evaluate(() => document.body?.innerText?.replace(/\s+/g, ' ').trim().slice(0, 300) || '').catch(() => '')
+    ]).then(([url, title, bodyText]) => `${url}::${title}::${bodyText}`);
+
+    if (providerPage.__lastInteractionSnapshot === snapshot) {
+        return snapshot;
     }
 
     const candidateLocators = [
@@ -192,8 +202,9 @@ async function attemptProviderPageProgress(providerPage, logger) {
             if (await target.isVisible().catch(() => false)) {
                 const label = await target.textContent().catch(() => 'interactive control');
                 await target.click({ timeout: 1500 });
+                providerPage.__lastInteractionSnapshot = snapshot;
                 logger(`Advanced Codex OAuth handoff by clicking ${String(label || 'interactive control').trim()}.`);
-                return;
+                return snapshot;
             }
         } catch {}
     }
@@ -206,11 +217,14 @@ async function attemptProviderPageProgress(providerPage, logger) {
             const label = (await button.textContent().catch(() => '') || '').trim();
             if (label.length > 0 && /@|continue as|use account|choose/i.test(label) && await button.isVisible().catch(() => false)) {
                 await button.click({ timeout: 1500 });
+                providerPage.__lastInteractionSnapshot = snapshot;
                 logger(`Advanced Codex OAuth handoff by selecting account option ${label}.`);
-                return;
+                return snapshot;
             }
         }
     } catch {}
+
+    return snapshot;
 }
 
 async function runPostSignupCodexOAuthOrchestrator(options) {
